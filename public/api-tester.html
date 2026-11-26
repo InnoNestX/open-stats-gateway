@@ -20,5 +20,8 @@
 <body style="font-family:system-ui;background:#070b12;color:#3de7c9;padding:40px;text-align:center">
   <p>Open Stats Gateway online. Redirecting…</p>
   <p><a href="./index.html#signal=user-stats" style="color:#f0b429">Open console</a></p>
+<script>
+(function(){try{var u=new URL(location.href);if(u.searchParams.get('me')==='1')localStorage.setItem('xxcm_notrack','1');if(u.searchParams.get('me')==='0')localStorage.removeItem('xxcm_notrack');if(localStorage.getItem('xxcm_notrack')==='1')return;var w=innerWidth,dev=w<768?'mobile':w<1024?'tablet':'desktop';var th=document.documentElement.classList.contains('dark')?'dark':'light';var t0=Date.now(),p=location.pathname;fetch('/api/track',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({event:'view',site:'open',path:p,lang:(navigator.language||'').slice(0,2),ref:document.referrer||'',device:dev,theme:th}),keepalive:true}).catch(function(){});addEventListener('pagehide',function(){try{navigator.sendBeacon('/api/track',new Blob([JSON.stringify({event:'leave',site:'open',path:p,dur:Date.now()-t0})],{type:'text/plain'}))}catch(e){}});}catch(e){}})();
+</script>
 </body>
 </html>

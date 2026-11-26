@@ -173,19 +173,19 @@ app.use('/api/*', cors());
 
 // Persist a count of real API calls served (excludes the site's own dashboard
 // polling and internal cron). Fire-and-forget via waitUntil, so zero latency.
-const CALLS_SKIP = new Set(['/api/portfolio', '/api/views', '/api/health']);
+const CALLS_SKIP = new Set(['/api/portfolio', '/api/views', '/api/health', '/api/track']);
 app.use('/api/*', async (c, next) => {
   const cmd = redisClient();
   const path = new URL(c.req.url).pathname;
   if (cmd && !CALLS_SKIP.has(path) && !path.startsWith('/api/internal')) {
     const ep = (path.replace(/^\/api\//, '') || 'root').slice(0, 64);
-    const d = new Date().toISOString().slice(0, 10);
+    const { ym, dd } = parts();
     const work = (async () => {
-      await cmd(['HINCRBY', K.calls, 'total', '1']);
-      await cmd(['HINCRBY', K.calls, 'day:' + d, '1']);
-      await cmd(['HEXPIRE', K.calls, String(DAY_TTL), 'FIELDS', '1', 'day:' + d]);
+      await cmd(['INCR', K.callsTotal]);
+      await cmd(['HINCRBY', K.callsDaily(ym), dd, '1']);
+      await hexpire(cmd, K.callsDaily(ym), dd, DAY_TTL);
       await cmd(['HINCRBY', K.endpoints, ep, '1']);
-      await cmd(['HSET', K.meta, 'lastUpdated', new Date().toISOString()]);
+      await cmd(['SET', K.updated, new Date().toISOString()]);
     })().catch(() => {});
     const ctx = c.executionCtx;
     if (ctx && ctx.waitUntil) ctx.waitUntil(work);
@@ -196,7 +196,7 @@ app.use('/api/*', async (c, next) => {
 // Docker-Hub data is served by the authenticated Vercel backend; proxy those
 // endpoints so Cloudflare egress IPs don't hit Docker Hub's anonymous rate limit.
 const DOCKER_BACKEND = 'https://docker-hub-pull-counter.vercel.app';
-const NATIVE_PATHS = new Set(['/api/portfolio', '/api/health', '/api/openapi.json', '/api/views']);
+const NATIVE_PATHS = new Set(['/api/portfolio', '/api/health', '/api/openapi.json', '/api/views', '/api/track']);
 app.use('/api/*', async (c, next) => {
   const path = c.req.path;
   if (NATIVE_PATHS.has(path) || path.startsWith('/api/internal')) return next();
@@ -889,7 +889,7 @@ app.get('/api/portfolio', async (c) => {
 
   const rc = redisClient();
   let apiCalls = 0;
-  if (rc) apiCalls = Number((await rc(['HGET', K.calls, 'total']))?.result) || 0;
+  if (rc) apiCalls = Number((await rc(['GET', K.callsTotal]))?.result) || 0;
 
   let clawDownloads = 0;
   let clawSkills = 0;
@@ -1068,27 +1068,57 @@ app.get('/api/internal/snapshot-history', async (c) => {
 // into HASHes (one key per category, fields inside), with per-field TTL on the
 // time-bucketed rows so old data rolls off on its own:
 //
-//   stats:pageviews         HASH  total | day:YYYY-MM-DD (31d) | month:YYYY-MM (400d)
-//   stats:gateway:calls     HASH  total | day:YYYY-MM-DD (31d)
-//   stats:gateway:endpoints HASH  <endpoint> -> call count
-//   stats:security          HASH  scans30d
-//   stats:meta              HASH  schema | lastUpdated
+//   stats:pageviews:total              STRING  grand total (all sites)
+//   stats:pageviews:<site>:total       STRING  per-site total (www, open, ...)
+//   stats:pageviews:<site>:YYYY:MM     HASH    field DD -> views (field TTL 31d)  [site > year > month > days]
+//   stats:gateway:calls:total          STRING  API calls served
+//   stats:gateway:calls:daily:YYYY-MM  HASH    field DD -> count (field TTL 31d)
+//   stats:gateway:endpoints            HASH    <endpoint> -> count
+//   stats:security:scans30d            STRING  malicious scans, last 30d
+//   stats:meta:schema | :lastUpdated   STRING  schema version / last write
+//   stats:analytics:sites              HASH    site -> views
+//   stats:analytics:pages[:YYYY-MM]    HASH    "site:path" -> views (monthly bucket TTL)
+//   stats:analytics:lang               HASH    lang -> count
+//   stats:analytics:referrers          HASH    host -> count
+//   stats:analytics:devices            HASH    mobile|tablet|desktop -> count
+//   stats:analytics:theme              HASH    light|dark -> count
+//   stats:analytics:hours              HASH    0..23 (UTC) -> count
+//   stats:analytics:dwell              HASH    totalMs | count  (avg = totalMs/count)
+//   stats:analytics:dwellByPage        HASH    "site:path" -> total dwell ms
 // ---------------------------------------------------------------------------
 const K = {
-  pageviews: 'stats:pageviews',
-  calls: 'stats:gateway:calls',
+  pvTotal: 'stats:pageviews:total',                           // grand total (all sites)
+  pvSiteTotal: (site) => `stats:pageviews:${site}:total`,     // per-site total
+  pvSiteMonth: (site, yr, mo) => `stats:pageviews:${site}:${yr}:${mo}`, // HASH day -> views
+  callsTotal: 'stats:gateway:calls:total',
+  callsDaily: (ym) => `stats:gateway:calls:daily:${ym}`,
   endpoints: 'stats:gateway:endpoints',
-  security: 'stats:security',
-  meta: 'stats:meta'
+  scans: 'stats:security:scans30d',
+  schema: 'stats:meta:schema',
+  updated: 'stats:meta:lastUpdated',
+  // first-party web analytics, for the future analytics platform
+  aSites: 'stats:analytics:sites',
+  aPages: 'stats:analytics:pages',
+  aPagesMonth: (ym) => `stats:analytics:pages:${ym}`,
+  aLang: 'stats:analytics:lang',
+  aRef: 'stats:analytics:referrers',
+  aDevice: 'stats:analytics:devices',
+  aTheme: 'stats:analytics:theme',
+  aHours: 'stats:analytics:hours',
+  aDwell: 'stats:analytics:dwell',
+  aDwellPage: 'stats:analytics:dwellByPage'
 };
-const SCHEMA_VERSION = '3';
+const SCHEMA_VERSION = '5';
 const PV_BASELINE = 573771;    // real historical page-view total; applied once if below it
 const SCANS_SEED = 400960;     // all-domains last-30d malicious scans (from Cloudflare)
 const CALLS_BASELINE = 4996;   // historical API calls, carried over from the Vercel backend
 const DAY_TTL = 2678400;       // 31 days
 const MONTH_TTL = 34560000;    // 400 days (keeps a full year)
-const dayKey = () => new Date().toISOString().slice(0, 10);
-const monthKey = () => dayKey().slice(0, 7);
+// date parts for keys/fields: year-month (YYYY-MM), year (YYYY), day-of-month (DD), month (MM)
+const parts = () => {
+  const iso = new Date().toISOString();
+  return { ym: iso.slice(0, 7), y: iso.slice(0, 4), dd: iso.slice(8, 10), mm: iso.slice(5, 7) };
+};
 
 // Raw Upstash REST client. The @upstash/redis SDK's writes are unreliable on
 // Workers; a plain command-array POST is not.
@@ -1108,52 +1138,45 @@ function redisClient() {
 const hexpire = (cmd, key, field, ttl) =>
   cmd(['HEXPIRE', key, String(ttl), 'FIELDS', '1', field]);
 
-// One-time, idempotent migration of all legacy flat keys into the stats:* HASHes.
-async function migrateStats(cmd) {
-  const done = await cmd(['HGET', K.meta, 'schema']);
-  if (done && String(done.result) === SCHEMA_VERSION) return;
-  const num = async (args) => Number((await cmd(args))?.result);
-  const hmax = async (key, field, val) => {
-    if (!Number.isFinite(val)) return;
-    const cur = Number((await cmd(['HGET', key, field]))?.result) || 0;
-    if (val > cur) await cmd(['HSET', key, field, String(val)]);
-  };
-  // page views (from old pv:* and from the interim stats:pageviews:* string keys)
-  await hmax(K.pageviews, 'total', await num(['GET', 'pv:total']));
-  await hmax(K.pageviews, 'total', await num(['GET', 'stats:pageviews:total']));
-  for (const kk of (await cmd(['KEYS', 'pv:day:*']))?.result || [])
-    await hmax(K.pageviews, 'day:' + kk.split(':').pop(), await num(['GET', kk]));
-  for (const kk of (await cmd(['KEYS', 'stats:pageviews:daily:*']))?.result || [])
-    await hmax(K.pageviews, 'day:' + kk.split(':').pop(), await num(['GET', kk]));
-  for (const kk of (await cmd(['KEYS', 'pv:month:*']))?.result || [])
-    await hmax(K.pageviews, 'month:' + kk.split(':').pop(), await num(['GET', kk]));
-  for (const kk of (await cmd(['KEYS', 'stats:pageviews:monthly:*']))?.result || [])
-    await hmax(K.pageviews, 'month:' + kk.split(':').pop(), await num(['GET', kk]));
-  // security
-  await hmax(K.security, 'scans30d', await num(['GET', 'sec:scans30d']));
-  await hmax(K.security, 'scans30d', await num(['GET', 'stats:security:scans:last30d']));
-  // gateway calls total (old flat key + vercel baseline)
-  await hmax(K.calls, 'total', await num(['GET', 'stats:totalCalls']));
-  await hmax(K.calls, 'total', await num(['GET', 'stats:gateway:calls:total']));
-  {
-    const gs = await fetch(`${DOCKER_BACKEND}/api/stats`, { headers: { 'User-Agent': 'open-stats-gateway' } })
-      .then((r) => (r.ok ? r.json() : null)).catch(() => null);
-    await hmax(K.calls, 'total', Number(gs && gs.totalCalls) || CALLS_BASELINE);
-  }
-  // fold the interim byEndpoint hash into the endpoints hash
-  const be = (await cmd(['HGETALL', 'stats:gateway:calls:byEndpoint']))?.result;
-  if (Array.isArray(be)) for (let i = 0; i < be.length; i += 2) await hmax(K.endpoints, be[i], Number(be[i + 1]) || 0);
-  else if (be && typeof be === 'object') for (const [f, v] of Object.entries(be)) await hmax(K.endpoints, f, Number(v) || 0);
-  // delete every flat/legacy key -- these patterns never match the HASH keys
-  // above (which have no trailing ':')
-  for (const pat of ['pv:*', 'sec:*', 'views:*', 'stats:endpoint:*',
-                     'stats:pageviews:*', 'stats:security:*', 'stats:gateway:calls:*', 'stats:meta:*'])
-    for (const kk of (await cmd(['KEYS', pat]))?.result || []) await cmd(['DEL', kk]);
-  for (const kk of ['stats:totalCalls', 'stats:lastUpdated'])
-    await cmd(['DEL', kk]);
-  await cmd(['HSET', K.meta, 'schema', SCHEMA_VERSION]);
+// Read a hash as a plain object (Upstash REST returns HGETALL as a flat array).
+async function hgetallObj(cmd, key) {
+  const arr = (await cmd(['HGETALL', key]))?.result;
+  const obj = {};
+  if (Array.isArray(arr)) for (let i = 0; i < arr.length; i += 2) obj[arr[i]] = arr[i + 1];
+  else if (arr && typeof arr === 'object') Object.assign(obj, arr);
+  return obj;
 }
 
+// One-time, idempotent migration of all legacy flat keys into the stats:* HASHes.
+async function migrateStats(cmd) {
+  const done = await cmd(['GET', K.schema]);
+  if (done && String(done.result) === SCHEMA_VERSION) return;
+  // v4 -> v5: move the grand daily page-view hashes under site 'www' (site>year>month>days)
+  for (const kk of (await cmd(['KEYS', 'stats:pageviews:daily:*']))?.result || []) {
+    const ym = kk.split(':').pop();            // YYYY-MM
+    const yr = ym.slice(0, 4), mo = ym.slice(5, 7);
+    const days = await hgetallObj(cmd, kk);
+    let sum = 0;
+    for (const [d, v] of Object.entries(days)) {
+      const n = Number(v) || 0;
+      if (n <= 0) continue;
+      sum += n;
+      await cmd(['HSET', K.pvSiteMonth('www', yr, mo), d, String(n)]);
+      await hexpire(cmd, K.pvSiteMonth('www', yr, mo), d, DAY_TTL);
+    }
+    if (sum > 0) {
+      const cur = Number((await cmd(['GET', K.pvSiteTotal('www')]))?.result) || 0;
+      if (sum > cur) await cmd(['SET', K.pvSiteTotal('www'), String(sum)]);
+    }
+    await cmd(['DEL', kk]);
+  }
+  for (const kk of (await cmd(['KEYS', 'stats:pageviews:monthly:*']))?.result || [])
+    await cmd(['DEL', kk]);
+  if (!(await cmd(['GET', K.scans]))?.result) await cmd(['SET', K.scans, String(SCANS_SEED)]);
+  await cmd(['SET', K.schema, SCHEMA_VERSION]);
+}
+
+// Read-only: return display numbers. Counting happens in POST /api/track.
 app.get('/api/views', async (c) => {
   const noStore = { 'Cache-Control': 'no-store' };
   const empty = { total: 0, today: 0, month: 0, scans30d: 0 };
@@ -1161,24 +1184,70 @@ app.get('/api/views', async (c) => {
   if (!cmd) return c.json(empty, 200, rateHeaders(c, noStore));
   try {
     await migrateStats(cmd);
-    const d = dayKey();
-    const m = monthKey();
-    let total = Number((await cmd(['HINCRBY', K.pageviews, 'total', '1']))?.result) || 0;
-    if (PV_BASELINE > 0 && total < PV_BASELINE) {
-      await cmd(['HSET', K.pageviews, 'total', String(PV_BASELINE)]);
-      total = PV_BASELINE;
-    }
-    const day = Number((await cmd(['HINCRBY', K.pageviews, 'day:' + d, '1']))?.result) || 0;
-    await hexpire(cmd, K.pageviews, 'day:' + d, DAY_TTL);
-    const month = Number((await cmd(['HINCRBY', K.pageviews, 'month:' + m, '1']))?.result) || 0;
-    await hexpire(cmd, K.pageviews, 'month:' + m, MONTH_TTL);
-    let scans30d = Number((await cmd(['HGET', K.security, 'scans30d']))?.result) || 0;
-    if (!scans30d) { await cmd(['HSET', K.security, 'scans30d', String(SCANS_SEED)]); scans30d = SCANS_SEED; }
-    await cmd(['HSET', K.meta, 'lastUpdated', new Date().toISOString()]);
-    return c.json({ total, today: day, month, scans30d }, 200, rateHeaders(c, noStore));
+    const { y, dd, mm } = parts();
+    const total = Number((await cmd(['GET', K.pvTotal]))?.result) || 0;
+    const wwwMonth = await hgetallObj(cmd, K.pvSiteMonth('www', y, mm));
+    const today = Number(wwwMonth[dd]) || 0;
+    let month = 0;
+    for (const v of Object.values(wwwMonth)) month += Number(v) || 0;
+    let scans30d = Number((await cmd(['GET', K.scans]))?.result) || 0;
+    if (!scans30d) { await cmd(['SET', K.scans, String(SCANS_SEED)]); scans30d = SCANS_SEED; }
+    return c.json({ total: total || PV_BASELINE, today, month, scans30d }, 200, rateHeaders(c, noStore));
   } catch {
     return c.json(empty, 200, rateHeaders(c, noStore));
   }
+});
+
+// First-party web-analytics beacon. Body (JSON, or text/plain holding JSON):
+//   { event:'view',  site, path, lang, ref, device, theme } -> page view + all dimensions
+//   { event:'leave', site, path, dur }                      -> dwell time (ms) on that page
+// Owner's own visits are filtered client-side before calling this.
+app.post('/api/track', async (c) => {
+  const cmd = redisClient();
+  if (!cmd) return c.body(null, 204);
+  let b = null;
+  try { b = JSON.parse(await c.req.text()); } catch { b = null; }
+  if (!b || typeof b !== 'object') return c.body(null, 204);
+  const { ym, y, dd, mm } = parts();
+  const hour = String(new Date().getUTCHours());
+  const site = /^[a-z][a-z0-9-]{1,15}$/.test(b.site) ? b.site : 'www';
+  const path = (typeof b.path === 'string' && b.path ? b.path : '/').slice(0, 128);
+  const sp = `${site}:${path}`.slice(0, 160);
+  const lang = /^[a-z]{2}$/.test(b.lang) ? b.lang : 'other';
+  const refHost = (() => {
+    try { return b.ref ? (new URL(b.ref).hostname || 'direct').slice(0, 80) : 'direct'; }
+    catch { return 'direct'; }
+  })();
+  const device = (b.device === 'mobile' || b.device === 'tablet') ? b.device : 'desktop';
+  const theme = b.theme === 'dark' ? 'dark' : 'light';
+  const run = (async () => {
+    if (b.event === 'view') {
+      let total = Number((await cmd(['INCR', K.pvTotal]))?.result) || 0;
+      if (total < PV_BASELINE) await cmd(['SET', K.pvTotal, String(PV_BASELINE)]);
+      await cmd(['INCR', K.pvSiteTotal(site)]);
+      await cmd(['HINCRBY', K.pvSiteMonth(site, y, mm), dd, '1']);
+      await hexpire(cmd, K.pvSiteMonth(site, y, mm), dd, DAY_TTL);
+      await cmd(['HINCRBY', K.aSites, site, '1']);
+      await cmd(['HINCRBY', K.aPages, sp, '1']);
+      await cmd(['HINCRBY', K.aPagesMonth(ym), sp, '1']); await hexpire(cmd, K.aPagesMonth(ym), sp, MONTH_TTL);
+      await cmd(['HINCRBY', K.aLang, lang, '1']);
+      await cmd(['HINCRBY', K.aRef, refHost || 'direct', '1']);
+      await cmd(['HINCRBY', K.aDevice, device, '1']);
+      await cmd(['HINCRBY', K.aTheme, theme, '1']);
+      await cmd(['HINCRBY', K.aHours, hour, '1']);
+      await cmd(['SET', K.updated, new Date().toISOString()]);
+    } else if (b.event === 'leave') {
+      const dur = Math.max(0, Math.min(Math.round(Number(b.dur) || 0), 1800000)); // cap 30 min
+      if (dur > 0) {
+        await cmd(['HINCRBY', K.aDwell, 'totalMs', String(dur)]);
+        await cmd(['HINCRBY', K.aDwell, 'count', '1']);
+        await cmd(['HINCRBY', K.aDwellPage, sp, String(dur)]);
+      }
+    }
+  })().catch(() => {});
+  const ctx = c.executionCtx;
+  if (ctx && ctx.waitUntil) ctx.waitUntil(run); else await run;
+  return c.body(null, 204);
 });
 
 // Diagnostic: dump every Redis key and hash so the schema can be verified.
