@@ -1043,7 +1043,7 @@ app.get('/api/internal/snapshot-history', async (c) => {
 //   pv:month:YYYY-MM   per-month, kept ~1 year (TTL), then rolls off
 // Each view increments all three, so monthly retains the sum after daily expires,
 // and the total retains everything after monthly expires. No cron needed.
-const PV_BASELINE = 0; // set to the real historical total; applied once if below it
+const PV_BASELINE = 573771; // set to the real historical total; applied once if below it
 const PV_DAY_TTL = '2678400';    // 31 days
 const PV_MONTH_TTL = '34560000'; // 400 days (keeps a full year)
 app.get('/api/views', async (c) => {
