@@ -812,6 +812,70 @@ app.get('/api/stats', async (c) => {
   }, 200, rateHeaders(c, { 'Cache-Control': 'public, max-age=15' }));
 });
 
+// Portfolio aggregate: ClawHub + GitHub, computed and cached server-side so the
+// website just pulls the latest value instead of every visitor recomputing it.
+const PORTFOLIO_CACHE_HEADERS = { 'Cache-Control': 'public, s-maxage=1800, stale-while-revalidate=3600' };
+app.get('/api/portfolio', async (c) => {
+  const cache = require('./lib/cache');
+  const CACHE_KEY = 'portfolio:xuxuclassmate';
+  const cached = cache.get(CACHE_KEY);
+  if (cached) {
+    return c.json(cached, 200, rateHeaders(c, PORTFOLIO_CACHE_HEADERS));
+  }
+
+  const USER = 'xuxuclassmate';
+  const SKILLS = [
+    'skill-publishing', 'free-api-discovery', 'feishu-setup-troubleshooting',
+    'ai-testcase-generator', 'stock-monitor-fixed', 'stock-analysis-fixed',
+    'test-master-fixed', 'trading-assistant-core', 'whisper-voice-transcription',
+    'custom-mail-skill', 'relay'
+  ];
+  const PLUGINS = ['relay'];
+  const jget = (u) =>
+    fetch(u, { headers: { 'User-Agent': 'portfolio-stats' } })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+
+  const [skRes, pkRes, ghIssues, ghPRs] = await Promise.all([
+    Promise.all(SKILLS.map((s) => jget(`https://clawhub.ai/api/v1/skills/${s}?owner=${USER}`))),
+    Promise.all(PLUGINS.map((n) => jget(`https://clawhub.ai/api/v1/packages/${n}`))),
+    jget(`https://api.github.com/search/issues?q=${encodeURIComponent(`author:${USER} type:issue`)}&per_page=1`),
+    jget(`https://api.github.com/search/issues?q=${encodeURIComponent(`author:${USER} type:pr`)}&per_page=1`)
+  ]);
+
+  let clawDownloads = 0;
+  let clawSkills = 0;
+  let clawPlugins = 0;
+  for (const d of skRes) {
+    if (d && d.owner && d.owner.handle === USER && d.skill && d.skill.stats && typeof d.skill.stats.downloads === 'number') {
+      clawDownloads += d.skill.stats.downloads;
+      clawSkills += 1;
+    }
+  }
+  for (const d of pkRes) {
+    if (d && d.owner && d.owner.handle === USER && d.package && d.package.stats && typeof d.package.stats.downloads === 'number') {
+      clawDownloads += d.package.stats.downloads;
+      clawPlugins += 1;
+    }
+  }
+
+  const data = {
+    clawDownloads,
+    clawSkills,
+    clawPlugins,
+    ghIssues: Number(ghIssues && ghIssues.total_count) || 0,
+    ghPRs: Number(ghPRs && ghPRs.total_count) || 0,
+    updatedAt: new Date().toISOString()
+  };
+
+  // Only cache a healthy result, so a transient upstream failure self-heals.
+  if (clawSkills > 0 || clawPlugins > 0) {
+    cache.set(CACHE_KEY, data, 30 * 60 * 1000);
+  }
+
+  return c.json(data, 200, rateHeaders(c, PORTFOLIO_CACHE_HEADERS));
+});
+
 async function userBadgeHandler(c, type) {
   const username = c.req.query('username');
   if (!username) {
