@@ -171,6 +171,28 @@ function parseDays(value, fallback = 30) {
 
 app.use('/api/*', cors());
 
+// Persist a count of real API calls served (excludes the site's own dashboard
+// polling and internal cron). Fire-and-forget via waitUntil, so zero latency.
+const CALLS_SKIP = new Set(['/api/portfolio', '/api/views', '/api/health']);
+app.use('/api/*', async (c, next) => {
+  const cmd = redisClient();
+  const path = new URL(c.req.url).pathname;
+  if (cmd && !CALLS_SKIP.has(path) && !path.startsWith('/api/internal')) {
+    const ep = (path.replace(/^\/api\//, '') || 'root').slice(0, 64);
+    const d = new Date().toISOString().slice(0, 10);
+    const work = (async () => {
+      await cmd(['HINCRBY', K.calls, 'total', '1']);
+      await cmd(['HINCRBY', K.calls, 'day:' + d, '1']);
+      await cmd(['HEXPIRE', K.calls, String(DAY_TTL), 'FIELDS', '1', 'day:' + d]);
+      await cmd(['HINCRBY', K.endpoints, ep, '1']);
+      await cmd(['HSET', K.meta, 'lastUpdated', new Date().toISOString()]);
+    })().catch(() => {});
+    const ctx = c.executionCtx;
+    if (ctx && ctx.waitUntil) ctx.waitUntil(work);
+  }
+  return next();
+});
+
 // Docker-Hub data is served by the authenticated Vercel backend; proxy those
 // endpoints so Cloudflare egress IPs don't hit Docker Hub's anonymous rate limit.
 const DOCKER_BACKEND = 'https://docker-hub-pull-counter.vercel.app';
@@ -865,6 +887,10 @@ app.get('/api/portfolio', async (c) => {
     jget(`${DOCKER_BACKEND}/api/user/history?username=${USER}`)
   ]);
 
+  const rc = redisClient();
+  let apiCalls = 0;
+  if (rc) apiCalls = Number((await rc(['HGET', K.calls, 'total']))?.result) || 0;
+
   let clawDownloads = 0;
   let clawSkills = 0;
   let clawPlugins = 0;
@@ -885,7 +911,7 @@ app.get('/api/portfolio', async (c) => {
   const data = {
     pulls: Number(us && us.totalPulls) || 0,
     images: Number(us && us.repositoryCount) || 0,
-    apiCalls: Number(gs && gs.totalCalls) || 0,
+    apiCalls: apiCalls || Number(gs && gs.totalCalls) || 0,
     monthDelta: pts.length > 1 ? pts[pts.length - 1] - pts[0] : 0,
     history: pts,
     clawDownloads,
@@ -1037,48 +1063,148 @@ app.get('/api/internal/snapshot-history', async (c) => {
   );
 });
 
-// Page views: tiered retention in a dedicated `pv:` namespace.
-//   pv:total          all-time total, standalone, never expires (seeded to baseline)
-//   pv:day:YYYY-MM-DD  per-day, kept ~1 month (TTL), then rolls off
-//   pv:month:YYYY-MM   per-month, kept ~1 year (TTL), then rolls off
-// Each view increments all three, so monthly retains the sum after daily expires,
-// and the total retains everything after monthly expires. No cron needed.
-const PV_BASELINE = 573771; // set to the real historical total; applied once if below it
-const SCANS_SEED = 400960;        // all-domains last-30d malicious scans (from Cloudflare)
-const PV_DAY_TTL = '2678400';    // 31 days
-const PV_MONTH_TTL = '34560000'; // 400 days (keeps a full year)
-app.get('/api/views', async (c) => {
-  const noStore = { 'Cache-Control': 'no-store' };
+// ---------------------------------------------------------------------------
+// Redis schema (Upstash) -- one `stats:` namespace. Related metrics are grouped
+// into HASHes (one key per category, fields inside), with per-field TTL on the
+// time-bucketed rows so old data rolls off on its own:
+//
+//   stats:pageviews         HASH  total | day:YYYY-MM-DD (31d) | month:YYYY-MM (400d)
+//   stats:gateway:calls     HASH  total | day:YYYY-MM-DD (31d)
+//   stats:gateway:endpoints HASH  <endpoint> -> call count
+//   stats:security          HASH  scans30d
+//   stats:meta              HASH  schema | lastUpdated
+// ---------------------------------------------------------------------------
+const K = {
+  pageviews: 'stats:pageviews',
+  calls: 'stats:gateway:calls',
+  endpoints: 'stats:gateway:endpoints',
+  security: 'stats:security',
+  meta: 'stats:meta'
+};
+const SCHEMA_VERSION = '3';
+const PV_BASELINE = 573771;    // real historical page-view total; applied once if below it
+const SCANS_SEED = 400960;     // all-domains last-30d malicious scans (from Cloudflare)
+const CALLS_BASELINE = 4996;   // historical API calls, carried over from the Vercel backend
+const DAY_TTL = 2678400;       // 31 days
+const MONTH_TTL = 34560000;    // 400 days (keeps a full year)
+const dayKey = () => new Date().toISOString().slice(0, 10);
+const monthKey = () => dayKey().slice(0, 7);
+
+// Raw Upstash REST client. The @upstash/redis SDK's writes are unreliable on
+// Workers; a plain command-array POST is not.
+function redisClient() {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  const empty = { total: 0, today: 0, month: 0, scans30d: 0 };
-  if (!url || !token) return c.json(empty, 200, rateHeaders(c, noStore));
-  const cmd = (args) =>
+  if (!url || !token) return null;
+  return (args) =>
     fetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(args)
     }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+}
+
+// Give a single hash field its own TTL (Upstash supports hash-field expiry).
+const hexpire = (cmd, key, field, ttl) =>
+  cmd(['HEXPIRE', key, String(ttl), 'FIELDS', '1', field]);
+
+// One-time, idempotent migration of all legacy flat keys into the stats:* HASHes.
+async function migrateStats(cmd) {
+  const done = await cmd(['HGET', K.meta, 'schema']);
+  if (done && String(done.result) === SCHEMA_VERSION) return;
+  const num = async (args) => Number((await cmd(args))?.result);
+  const hmax = async (key, field, val) => {
+    if (!Number.isFinite(val)) return;
+    const cur = Number((await cmd(['HGET', key, field]))?.result) || 0;
+    if (val > cur) await cmd(['HSET', key, field, String(val)]);
+  };
+  // page views (from old pv:* and from the interim stats:pageviews:* string keys)
+  await hmax(K.pageviews, 'total', await num(['GET', 'pv:total']));
+  await hmax(K.pageviews, 'total', await num(['GET', 'stats:pageviews:total']));
+  for (const kk of (await cmd(['KEYS', 'pv:day:*']))?.result || [])
+    await hmax(K.pageviews, 'day:' + kk.split(':').pop(), await num(['GET', kk]));
+  for (const kk of (await cmd(['KEYS', 'stats:pageviews:daily:*']))?.result || [])
+    await hmax(K.pageviews, 'day:' + kk.split(':').pop(), await num(['GET', kk]));
+  for (const kk of (await cmd(['KEYS', 'pv:month:*']))?.result || [])
+    await hmax(K.pageviews, 'month:' + kk.split(':').pop(), await num(['GET', kk]));
+  for (const kk of (await cmd(['KEYS', 'stats:pageviews:monthly:*']))?.result || [])
+    await hmax(K.pageviews, 'month:' + kk.split(':').pop(), await num(['GET', kk]));
+  // security
+  await hmax(K.security, 'scans30d', await num(['GET', 'sec:scans30d']));
+  await hmax(K.security, 'scans30d', await num(['GET', 'stats:security:scans:last30d']));
+  // gateway calls total (old flat key + vercel baseline)
+  await hmax(K.calls, 'total', await num(['GET', 'stats:totalCalls']));
+  await hmax(K.calls, 'total', await num(['GET', 'stats:gateway:calls:total']));
+  {
+    const gs = await fetch(`${DOCKER_BACKEND}/api/stats`, { headers: { 'User-Agent': 'open-stats-gateway' } })
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    await hmax(K.calls, 'total', Number(gs && gs.totalCalls) || CALLS_BASELINE);
+  }
+  // fold the interim byEndpoint hash into the endpoints hash
+  const be = (await cmd(['HGETALL', 'stats:gateway:calls:byEndpoint']))?.result;
+  if (Array.isArray(be)) for (let i = 0; i < be.length; i += 2) await hmax(K.endpoints, be[i], Number(be[i + 1]) || 0);
+  else if (be && typeof be === 'object') for (const [f, v] of Object.entries(be)) await hmax(K.endpoints, f, Number(v) || 0);
+  // delete every flat/legacy key -- these patterns never match the HASH keys
+  // above (which have no trailing ':')
+  for (const pat of ['pv:*', 'sec:*', 'views:*', 'stats:endpoint:*',
+                     'stats:pageviews:*', 'stats:security:*', 'stats:gateway:calls:*', 'stats:meta:*'])
+    for (const kk of (await cmd(['KEYS', pat]))?.result || []) await cmd(['DEL', kk]);
+  for (const kk of ['stats:totalCalls', 'stats:lastUpdated'])
+    await cmd(['DEL', kk]);
+  await cmd(['HSET', K.meta, 'schema', SCHEMA_VERSION]);
+}
+
+app.get('/api/views', async (c) => {
+  const noStore = { 'Cache-Control': 'no-store' };
+  const empty = { total: 0, today: 0, month: 0, scans30d: 0 };
+  const cmd = redisClient();
+  if (!cmd) return c.json(empty, 200, rateHeaders(c, noStore));
   try {
-    const now = new Date();
-    const day = now.toISOString().slice(0, 10);
-    const month = day.slice(0, 7);
-    let total = Number((await cmd(['INCR', 'pv:total']))?.result) || 0;
+    await migrateStats(cmd);
+    const d = dayKey();
+    const m = monthKey();
+    let total = Number((await cmd(['HINCRBY', K.pageviews, 'total', '1']))?.result) || 0;
     if (PV_BASELINE > 0 && total < PV_BASELINE) {
-      await cmd(['SET', 'pv:total', String(PV_BASELINE)]);
+      await cmd(['HSET', K.pageviews, 'total', String(PV_BASELINE)]);
       total = PV_BASELINE;
     }
-    const today = Number((await cmd(['INCR', `pv:day:${day}`]))?.result) || 0;
-    await cmd(['EXPIRE', `pv:day:${day}`, PV_DAY_TTL]);
-    const monthCount = Number((await cmd(['INCR', `pv:month:${month}`]))?.result) || 0;
-    await cmd(['EXPIRE', `pv:month:${month}`, PV_MONTH_TTL]);
-    // malicious scans across all zones (last 30d), kept in Redis; cron refreshes it from Cloudflare
-    let scans30d = Number((await cmd(['GET', 'sec:scans30d']))?.result) || 0;
-    if (!scans30d) { await cmd(['SET', 'sec:scans30d', String(SCANS_SEED)]); scans30d = SCANS_SEED; }
-    return c.json({ total, today, month: monthCount, scans30d }, 200, rateHeaders(c, noStore));
+    const day = Number((await cmd(['HINCRBY', K.pageviews, 'day:' + d, '1']))?.result) || 0;
+    await hexpire(cmd, K.pageviews, 'day:' + d, DAY_TTL);
+    const month = Number((await cmd(['HINCRBY', K.pageviews, 'month:' + m, '1']))?.result) || 0;
+    await hexpire(cmd, K.pageviews, 'month:' + m, MONTH_TTL);
+    let scans30d = Number((await cmd(['HGET', K.security, 'scans30d']))?.result) || 0;
+    if (!scans30d) { await cmd(['HSET', K.security, 'scans30d', String(SCANS_SEED)]); scans30d = SCANS_SEED; }
+    await cmd(['HSET', K.meta, 'lastUpdated', new Date().toISOString()]);
+    return c.json({ total, today: day, month, scans30d }, 200, rateHeaders(c, noStore));
   } catch {
     return c.json(empty, 200, rateHeaders(c, noStore));
   }
+});
+
+// Diagnostic: dump every Redis key and hash so the schema can be verified.
+app.get('/api/internal/stats-dump', async (c) => {
+  const cmd = redisClient();
+  if (!cmd) return c.json({ error: 'redis-not-configured' }, 200, { 'Cache-Control': 'no-store' });
+  const keys = ((await cmd(['KEYS', '*']))?.result || []).sort();
+  const dump = {};
+  for (const k of keys) {
+    const t = (await cmd(['TYPE', k]))?.result;
+    if (t === 'hash') {
+      const arr = (await cmd(['HGETALL', k]))?.result || [];
+      const obj = {};
+      if (Array.isArray(arr)) for (let i = 0; i < arr.length; i += 2) obj[arr[i]] = arr[i + 1];
+      else Object.assign(obj, arr || {});
+      const fields = Object.keys(obj);
+      const ttls = fields.length
+        ? (await cmd(['HTTL', k, 'FIELDS', String(fields.length), ...fields]))?.result || []
+        : [];
+      dump[k] = {};
+      fields.forEach((f, i) => { dump[k][f] = { v: obj[f], ttl: ttls[i] }; });
+    } else {
+      dump[k] = (await cmd(['GET', k]))?.result;
+    }
+  }
+  return c.json({ keys, dump }, 200, { 'Cache-Control': 'no-store' });
 });
 
 app.get('/api/health', async (c) => {
