@@ -1039,13 +1039,21 @@ app.get('/api/internal/snapshot-history', async (c) => {
 
 app.get('/api/views', async (c) => {
   const noStore = { 'Cache-Control': 'no-store' };
-  if (!redis) return c.json({ total: 0, today: 0 }, 200, rateHeaders(c, noStore));
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return c.json({ total: 0, today: 0 }, 200, rateHeaders(c, noStore));
+  const cmd = (args) =>
+    fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(args)
+    }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   try {
     const day = new Date().toISOString().slice(0, 10);
-    const total = await redis.incr('views:total');
-    const today = await redis.incr(`views:day:${day}`);
-    await redis.expire(`views:day:${day}`, 60 * 60 * 48);
-    return c.json({ total, today }, 200, rateHeaders(c, noStore));
+    const t = await cmd(['INCR', 'views:total']);
+    const d = await cmd(['INCR', `views:day:${day}`]);
+    await cmd(['EXPIRE', `views:day:${day}`, '172800']);
+    return c.json({ total: Number(t && t.result) || 0, today: Number(d && d.result) || 0 }, 200, rateHeaders(c, noStore));
   } catch {
     return c.json({ total: 0, today: 0 }, 200, rateHeaders(c, noStore));
   }
