@@ -174,7 +174,7 @@ app.use('/api/*', cors());
 // Docker-Hub data is served by the authenticated Vercel backend; proxy those
 // endpoints so Cloudflare egress IPs don't hit Docker Hub's anonymous rate limit.
 const DOCKER_BACKEND = 'https://docker-hub-pull-counter.vercel.app';
-const NATIVE_PATHS = new Set(['/api/portfolio', '/api/health', '/api/openapi.json']);
+const NATIVE_PATHS = new Set(['/api/portfolio', '/api/health', '/api/openapi.json', '/api/views']);
 app.use('/api/*', async (c, next) => {
   const path = c.req.path;
   if (NATIVE_PATHS.has(path) || path.startsWith('/api/internal')) return next();
@@ -1035,6 +1035,20 @@ app.get('/api/internal/snapshot-history', async (c) => {
     200,
     rateHeaders(c)
   );
+});
+
+app.get('/api/views', async (c) => {
+  const noStore = { 'Cache-Control': 'no-store' };
+  if (!redis) return c.json({ total: 0, today: 0 }, 200, rateHeaders(c, noStore));
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    const total = await redis.incr('views:total');
+    const today = await redis.incr(`views:day:${day}`);
+    await redis.expire(`views:day:${day}`, 60 * 60 * 48);
+    return c.json({ total, today }, 200, rateHeaders(c, noStore));
+  } catch {
+    return c.json({ total: 0, today: 0 }, 200, rateHeaders(c, noStore));
+  }
 });
 
 app.get('/api/health', async (c) => {
