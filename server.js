@@ -1037,11 +1037,21 @@ app.get('/api/internal/snapshot-history', async (c) => {
   );
 });
 
+// Page views: tiered retention in a dedicated `pv:` namespace.
+//   pv:total          all-time total, standalone, never expires (seeded to baseline)
+//   pv:day:YYYY-MM-DD  per-day, kept ~1 month (TTL), then rolls off
+//   pv:month:YYYY-MM   per-month, kept ~1 year (TTL), then rolls off
+// Each view increments all three, so monthly retains the sum after daily expires,
+// and the total retains everything after monthly expires. No cron needed.
+const PV_BASELINE = 0; // set to the real historical total; applied once if below it
+const PV_DAY_TTL = '2678400';    // 31 days
+const PV_MONTH_TTL = '34560000'; // 400 days (keeps a full year)
 app.get('/api/views', async (c) => {
   const noStore = { 'Cache-Control': 'no-store' };
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return c.json({ total: 0, today: 0 }, 200, rateHeaders(c, noStore));
+  const empty = { total: 0, today: 0, month: 0 };
+  if (!url || !token) return c.json(empty, 200, rateHeaders(c, noStore));
   const cmd = (args) =>
     fetch(url, {
       method: 'POST',
@@ -1049,13 +1059,21 @@ app.get('/api/views', async (c) => {
       body: JSON.stringify(args)
     }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   try {
-    const day = new Date().toISOString().slice(0, 10);
-    const t = await cmd(['INCR', 'views:total']);
-    const d = await cmd(['INCR', `views:day:${day}`]);
-    await cmd(['EXPIRE', `views:day:${day}`, '172800']);
-    return c.json({ total: Number(t && t.result) || 0, today: Number(d && d.result) || 0 }, 200, rateHeaders(c, noStore));
+    const now = new Date();
+    const day = now.toISOString().slice(0, 10);
+    const month = day.slice(0, 7);
+    let total = Number((await cmd(['INCR', 'pv:total']))?.result) || 0;
+    if (PV_BASELINE > 0 && total < PV_BASELINE) {
+      await cmd(['SET', 'pv:total', String(PV_BASELINE)]);
+      total = PV_BASELINE;
+    }
+    const today = Number((await cmd(['INCR', `pv:day:${day}`]))?.result) || 0;
+    await cmd(['EXPIRE', `pv:day:${day}`, PV_DAY_TTL]);
+    const monthCount = Number((await cmd(['INCR', `pv:month:${month}`]))?.result) || 0;
+    await cmd(['EXPIRE', `pv:month:${month}`, PV_MONTH_TTL]);
+    return c.json({ total, today, month: monthCount }, 200, rateHeaders(c, noStore));
   } catch {
-    return c.json({ total: 0, today: 0 }, 200, rateHeaders(c, noStore));
+    return c.json(empty, 200, rateHeaders(c, noStore));
   }
 });
 
