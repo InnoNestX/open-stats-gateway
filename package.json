@@ -1,5 +1,5 @@
 {
-  "name": "docker-hub-pull-counter",
+  "name": "open-stats-gateway",
   "version": "1.0.0",
   "scripts": {
     "dev": "hono dev server.js",
@@ -10,5 +10,8 @@
     "@upstash/redis": "^1.28.0",
     "@vercel/speed-insights": "^2.0.0",
     "hono": "^4.0.0"
+  },
+  "devDependencies": {
+    "wrangler": "^3.114.17"
   }
 }

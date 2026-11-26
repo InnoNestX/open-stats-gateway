@@ -3,34 +3,34 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Docker Hub API Gateway — Pull Counts, Stats Cards &amp; Badges | Signal Bridge</title>
-<meta name="description" content="Free Docker Hub API gateway for pull counts, stars, repository tags, SVG stats cards, and Shields badges. Live console: https://docker-hub-pull-counter.vercel.app — docs on GitHub and OpenAPI.">
-<meta name="keywords" content="Docker Hub API, Docker Hub pull count, Docker Hub stats, Docker Hub badge, SVG stats card, docker pulls API, repository tags API, Shields.io docker, free Docker Hub proxy, Signal Bridge">
+<title>Open Stats Gateway — Pull Counts, Stats Cards &amp; Badges | Open Stats Gateway</title>
+<meta name="description" content="Free Docker Hub API gateway for pull counts, stars, repository tags, SVG stats cards, and Shields badges. Live console: https://open.xuxuclassmate.com — docs on GitHub and OpenAPI.">
+<meta name="keywords" content="Docker Hub API, Docker Hub pull count, Docker Hub stats, Docker Hub badge, SVG stats card, docker pulls API, repository tags API, Shields.io docker, free Docker Hub proxy, Open Stats Gateway">
 <meta name="author" content="InnoNestX / XuXuClassMate">
 <meta name="robots" content="index,follow,max-image-preview:large">
 <meta name="theme-color" content="#070b12">
-<link rel="canonical" href="https://docker-hub-pull-counter.vercel.app/">
-<link rel="alternate" hreflang="en" href="https://docker-hub-pull-counter.vercel.app/">
-<link rel="alternate" hreflang="zh-CN" href="https://docker-hub-pull-counter.vercel.app/">
+<link rel="canonical" href="https://open.xuxuclassmate.com/">
+<link rel="alternate" hreflang="en" href="https://open.xuxuclassmate.com/">
+<link rel="alternate" hreflang="zh-CN" href="https://open.xuxuclassmate.com/">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Docker Hub API Gateway">
-<meta property="og:title" content="Docker Hub API Gateway — Pull Counts, Stats Cards &amp; Badges">
-<meta property="og:description" content="Free API for Docker Hub user/repo stats, SVG cards, growth history, and Shields badges. Try the live Signal Bridge console.">
-<meta property="og:url" content="https://docker-hub-pull-counter.vercel.app/">
-<meta property="og:image" content="https://docker-hub-pull-counter.vercel.app/api/docker-stats?username=xuxuclassmate&amp;style=gradient">
+<meta property="og:site_name" content="Open Stats Gateway">
+<meta property="og:title" content="Open Stats Gateway — Pull Counts, Stats Cards &amp; Badges">
+<meta property="og:description" content="Free API for Docker Hub user/repo stats, SVG cards, growth history, and Shields badges. Try the live Open Stats Gateway console.">
+<meta property="og:url" content="https://open.xuxuclassmate.com/">
+<meta property="og:image" content="https://open.xuxuclassmate.com/api/docker-stats?username=xuxuclassmate&amp;style=gradient">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Docker Hub API Gateway — Signal Bridge">
+<meta name="twitter:title" content="Open Stats Gateway — Open Stats Gateway">
 <meta name="twitter:description" content="Free Docker Hub pull-count API, SVG cards, and badges. Live demo and docs included.">
-<meta name="twitter:image" content="https://docker-hub-pull-counter.vercel.app/api/docker-stats?username=xuxuclassmate&amp;style=gradient">
+<meta name="twitter:image" content="https://open.xuxuclassmate.com/api/docker-stats?username=xuxuclassmate&amp;style=gradient">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@graph": [
     {
       "@type": "WebApplication",
-      "name": "Docker Hub API Gateway",
-      "alternateName": "Signal Bridge",
-      "url": "https://docker-hub-pull-counter.vercel.app/",
+      "name": "Open Stats Gateway",
+      "alternateName": "Open Stats Gateway",
+      "url": "https://open.xuxuclassmate.com/",
       "description": "Free Docker Hub API gateway for pull counts, stars, repository metadata, SVG stats cards, and Shields badges.",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "Any",
@@ -39,8 +39,8 @@
     },
     {
       "@type": "SoftwareSourceCode",
-      "name": "docker-hub-pull-counter",
-      "codeRepository": "https://github.com/InnoNestX/docker-hub-pull-counter",
+      "name": "open-stats-gateway",
+      "codeRepository": "https://github.com/InnoNestX/open-stats-gateway",
       "programmingLanguage": "JavaScript",
       "runtimePlatform": "Node.js",
       "license": "https://opensource.org/licenses/MIT"
@@ -247,8 +247,8 @@ button,input,select{font:inherit}
   <div class="brand">
     <img src="https://avatars.githubusercontent.com/u/273979879?v=4" alt="InnoNest">
     <div>
-      <div class="brand-title">SIGNAL <span>BRIDGE</span></div>
-      <div class="brand-sub">Docker Hub API Console</div>
+      <div class="brand-title">Open Stats <span>Gateway</span></div>
+      <div class="brand-sub">Open Stats Gateway Console</div>
     </div>
   </div>
   <div class="top-actions">
@@ -259,7 +259,7 @@ button,input,select{font:inherit}
     </a>
     <button class="ghost-btn map-toggle" type="button" onclick="toggleMap()" data-i18n="map-toggle">Endpoints</button>
     <a class="ghost-btn" href="./docs.html" data-i18n="nav-docs">Docs</a>
-    <a class="ghost-btn" href="https://github.com/InnoNestX/docker-hub-pull-counter" target="_blank" rel="noopener">GitHub</a>
+    <a class="ghost-btn" href="https://github.com/InnoNestX/open-stats-gateway" target="_blank" rel="noopener">GitHub</a>
     <button class="toggle-btn" id="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle theme"></button>
     <button class="toggle-btn" id="lang-toggle" type="button" onclick="toggleLang()">中文</button>
   </div>
@@ -282,7 +282,7 @@ button,input,select{font:inherit}
       <div id="params-container"></div>
       <div class="form-label" data-i18n="url-label">Request URL</div>
       <div class="url-box">
-        <span class="base" id="url-base">docker-hub-pull-counter.vercel.app</span>
+        <span class="base" id="url-base">open.xuxuclassmate.com</span>
         <span class="rest"><span id="url-path"></span><span id="url-params"></span></span>
         <button class="ghost-btn" type="button" onclick="copyUrl()" data-i18n="copy">Copy</button>
       </div>
@@ -309,17 +309,17 @@ button,input,select{font:inherit}
 </main>
 
 <footer class="foot">
-  <div>© 2026 InnoNestX · Signal Bridge</div>
+  <div>© 2026 InnoNestX · Open Stats Gateway</div>
   <div>
     <a href="https://github.com/sponsors/InnoNestX" target="_blank" rel="noopener">Sponsor</a> ·
     <a href="https://www.buymeacoffee.com/xuxuclassmate" target="_blank" rel="noopener">Coffee</a> ·
-    <a href="https://github.com/InnoNestX/docker-hub-pull-counter/issues" target="_blank" rel="noopener">Issues</a>
+    <a href="https://github.com/InnoNestX/open-stats-gateway/issues" target="_blank" rel="noopener">Issues</a>
   </div>
 </footer>
 </div>
 
 <script>
-const BASE_URL='docker-hub-pull-counter.vercel.app';
+const BASE_URL='open.xuxuclassmate.com';
 let lang='en';
 let currentSignal='user-stats';
 let currentTab='body';

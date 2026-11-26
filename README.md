@@ -1,16 +1,16 @@
-# Docker Hub API Gateway
+# Open Stats Gateway
 
-**Live demo:** [https://docker-hub-pull-counter.vercel.app](https://docker-hub-pull-counter.vercel.app)  
-**API docs:** [https://docker-hub-pull-counter.vercel.app/docs.html](https://docker-hub-pull-counter.vercel.app/docs.html)  
-**Usage showcase:** [https://docker-hub-pull-counter.vercel.app/usage.html](https://docker-hub-pull-counter.vercel.app/usage.html)  
-**OpenAPI:** [https://docker-hub-pull-counter.vercel.app/api/openapi.json](https://docker-hub-pull-counter.vercel.app/api/openapi.json)  
-**GitHub README:** [InnoNestX/docker-hub-pull-counter](https://github.com/InnoNestX/docker-hub-pull-counter#readme)
+**Live demo:** [https://open.xuxuclassmate.com](https://open.xuxuclassmate.com)  
+**API docs:** [https://open.xuxuclassmate.com/docs.html](https://open.xuxuclassmate.com/docs.html)  
+**Usage showcase:** [https://open.xuxuclassmate.com/usage.html](https://open.xuxuclassmate.com/usage.html)  
+**OpenAPI:** [https://open.xuxuclassmate.com/api/openapi.json](https://open.xuxuclassmate.com/api/openapi.json)  
+**GitHub README:** [InnoNestX/open-stats-gateway](https://github.com/InnoNestX/open-stats-gateway#readme)
 
-[![GitHub stars](https://img.shields.io/github/stars/InnoNestX/docker-hub-pull-counter?style=social)](https://github.com/InnoNestX/docker-hub-pull-counter)
+[![GitHub stars](https://img.shields.io/github/stars/InnoNestX/open-stats-gateway?style=social)](https://github.com/InnoNestX/open-stats-gateway)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
-[![Total API Calls](https://img.shields.io/endpoint?url=https://docker-hub-pull-counter.vercel.app/api/badge/total-calls)](https://github.com/InnoNestX/docker-hub-pull-counter)
+[![Total API Calls](https://img.shields.io/endpoint?url=https://open.xuxuclassmate.com/api/badge/total-calls)](https://github.com/InnoNestX/open-stats-gateway)
 
-🐛 [Report Bug](https://github.com/InnoNestX/docker-hub-pull-counter/issues) · 🔧 [Submit PR](https://github.com/InnoNestX/docker-hub-pull-counter/pulls) · ⭐ [Star Repo](https://github.com/InnoNestX/docker-hub-pull-counter) · 💖 [Sponsor](https://github.com/sponsors/InnoNestX) · 💬 [Discussions](https://github.com/InnoNestX/docker-hub-pull-counter/discussions)
+🐛 [Report Bug](https://github.com/InnoNestX/open-stats-gateway/issues) · 🔧 [Submit PR](https://github.com/InnoNestX/open-stats-gateway/pulls) · ⭐ [Star Repo](https://github.com/InnoNestX/open-stats-gateway) · 💖 [Sponsor](https://github.com/sponsors/InnoNestX) · 💬 [Discussions](https://github.com/InnoNestX/open-stats-gateway/discussions)
 
 ## ✨ Features
 
@@ -28,7 +28,7 @@
 🏆 **Popular Repos** - Browse namespaces ordered by pull count
 📄 **OpenAPI Spec** - Full OpenAPI specification endpoint
 🌐 **Bilingual** - English & Chinese support
-🧪 **Signal Bridge** - Docs and live API testing in one sci-fi console
+🧪 **Open Stats Gateway** - Docs and live API testing in one sci-fi console
 ⚡ **Short Cache** - 2-minute cache with `?fresh=1` escape hatch
 🛡 **Enforced Rate Limits** - Redis-backed limits with HTTP 429
 
@@ -93,7 +93,7 @@ Returns an SVG card for Docker Hub stats.
 Example:
 
 ```html
-<img src="https://docker-hub-pull-counter.vercel.app/api/docker-stats?username=xuxuclassmate" alt="Docker Hub Stats Card" />
+<img src="https://open.xuxuclassmate.com/api/docker-stats?username=xuxuclassmate" alt="Docker Hub Stats Card" />
 ```
 
 #### Available Card Styles
@@ -109,11 +109,11 @@ Example:
 Example URLs for each style:
 
 ```html
-<img src="https://docker-hub-pull-counter.vercel.app/api/docker-stats?username=xuxuclassmate&style=gradient" alt="Gradient Card" />
-<img src="https://docker-hub-pull-counter.vercel.app/api/docker-stats?username=xuxuclassmate&style=minimal" alt="Minimal Card" />
-<img src="https://docker-hub-pull-counter.vercel.app/api/docker-stats?username=xuxuclassmate&style=dark" alt="Dark Card" />
-<img src="https://docker-hub-pull-counter.vercel.app/api/docker-stats?username=xuxuclassmate&style=light" alt="Light Card" />
-<img src="https://docker-hub-pull-counter.vercel.app/api/docker-stats?username=xuxuclassmate&style=github" alt="GitHub Card" />
+<img src="https://open.xuxuclassmate.com/api/docker-stats?username=xuxuclassmate&style=gradient" alt="Gradient Card" />
+<img src="https://open.xuxuclassmate.com/api/docker-stats?username=xuxuclassmate&style=minimal" alt="Minimal Card" />
+<img src="https://open.xuxuclassmate.com/api/docker-stats?username=xuxuclassmate&style=dark" alt="Dark Card" />
+<img src="https://open.xuxuclassmate.com/api/docker-stats?username=xuxuclassmate&style=light" alt="Light Card" />
+<img src="https://open.xuxuclassmate.com/api/docker-stats?username=xuxuclassmate&style=github" alt="GitHub Card" />
 ```
 
 ### GET /api/docker-stats/styles
@@ -121,7 +121,7 @@ Example URLs for each style:
 List all available card styles.
 
 ```bash
-curl "https://docker-hub-pull-counter.vercel.app/api/docker-stats/styles"
+curl "https://open.xuxuclassmate.com/api/docker-stats/styles"
 ```
 
 Response:
@@ -235,13 +235,13 @@ curl "http://localhost:3000/api/repo/history?namespace=library&repo=nginx&days=3
 Trend SVG card:
 
 ```html
-<img src="https://docker-hub-pull-counter.vercel.app/api/trend?username=xuxuclassmate&days=30" alt="Pull trend" />
+<img src="https://open.xuxuclassmate.com/api/trend?username=xuxuclassmate&days=30" alt="Pull trend" />
 ```
 
 Growth badge:
 
 ```md
-![Pull Growth](https://img.shields.io/endpoint?url=https%3A%2F%2Fdocker-hub-pull-counter.vercel.app%2Fapi%2Fbadge%2Fgrowth%3Fusername%3Dxuxuclassmate%26days%3D7)
+![Pull Growth](https://img.shields.io/endpoint?url=https%3A%2F%2Fopen.xuxuclassmate.com%2Fapi%2Fbadge%2Fgrowth%3Fusername%3Dxuxuclassmate%26days%3D7)
 ```
 
 > First day shows `collecting` until a second daily snapshot exists.
@@ -249,9 +249,9 @@ Growth badge:
 ### Shields badges
 
 ```md
-![Docker Pulls](https://img.shields.io/endpoint?url=https%3A%2F%2Fdocker-hub-pull-counter.vercel.app%2Fapi%2Fbadge%2Fpulls%3Fusername%3Dxuxuclassmate)
-![Docker Stars](https://img.shields.io/endpoint?url=https%3A%2F%2Fdocker-hub-pull-counter.vercel.app%2Fapi%2Fbadge%2Fstars%3Fusername%3Dxuxuclassmate)
-![Docker Repos](https://img.shields.io/endpoint?url=https%3A%2F%2Fdocker-hub-pull-counter.vercel.app%2Fapi%2Fbadge%2Frepos%3Fusername%3Dxuxuclassmate)
+![Docker Pulls](https://img.shields.io/endpoint?url=https%3A%2F%2Fopen.xuxuclassmate.com%2Fapi%2Fbadge%2Fpulls%3Fusername%3Dxuxuclassmate)
+![Docker Stars](https://img.shields.io/endpoint?url=https%3A%2F%2Fopen.xuxuclassmate.com%2Fapi%2Fbadge%2Fstars%3Fusername%3Dxuxuclassmate)
+![Docker Repos](https://img.shields.io/endpoint?url=https%3A%2F%2Fopen.xuxuclassmate.com%2Fapi%2Fbadge%2Frepos%3Fusername%3Dxuxuclassmate)
 ```
 
 ### GET /api/openapi.json
@@ -269,22 +269,22 @@ curl "http://localhost:3000/api/openapi.json"
 Embed a live SVG card anywhere that supports an image tag.
 
 ```html
-<img src="https://docker-hub-pull-counter.vercel.app/api/docker-stats?username=xuxuclassmate" alt="Docker Hub Stats Card" />
+<img src="https://open.xuxuclassmate.com/api/docker-stats?username=xuxuclassmate" alt="Docker Hub Stats Card" />
 ```
 
 Repository card:
 
 ```html
-<img src="https://docker-hub-pull-counter.vercel.app/api/docker-stats?namespace=library&repo=nginx" alt="nginx stats" />
+<img src="https://open.xuxuclassmate.com/api/docker-stats?namespace=library&repo=nginx" alt="nginx stats" />
 ```
 
 ## ⚡ Data Freshness
 
 User stats responses use a short in-memory cache (default 2 minutes) and return `Cache-Control: public, max-age=120`. Pass `?fresh=1` to bypass the cache.
 
-## 🌍 Signal Bridge Console
+## 🌍 Open Stats Gateway Console
 
-Open the deployed site to enter **Signal Bridge** — a unified console where documentation and live requests share one screen:
+Open the deployed site to enter **Open Stats Gateway** — a unified console where documentation and live requests share one screen:
 
 - **Endpoints** — pick any API
 - **Docs** — path, params, and examples for the selection
@@ -321,7 +321,7 @@ If this project helps you, consider supporting us:
 
 - 🌟 [GitHub Sponsors](https://github.com/sponsors/InnoNestX) - Become a sponsor
 - ☕ [Buy Me a Coffee](https://buymeacoffee.com/xuxuclassmate) - One-time support
-- ⭐ [Star this repo](https://github.com/InnoNestX/docker-hub-pull-counter) - It's free and means a lot!
+- ⭐ [Star this repo](https://github.com/InnoNestX/open-stats-gateway) - It's free and means a lot!
 
 ## 👤 Author
 

@@ -14,7 +14,7 @@
 
 1. 打开 https://vercel.com/new
 2. 点击 "Import Git Repository"
-3. 选择 docker-hub-pull-counter
+3. 选择 open-stats-gateway
 
 **部署**
 
@@ -23,7 +23,7 @@
 
 **获取域名**
 
-部署完成后获得类似 https://docker-hub-pull-counter.vercel.app 的域名
+部署完成后获得类似 https://open.xuxuclassmate.com 的域名
 
 **可选：配置 Docker Hub 认证（提高 API 限额）**
 
@@ -38,7 +38,7 @@
 
 1. 访问 https://railway.app
 2. 创建新项目 → "Deploy from GitHub repo"
-3. 选择 XuXuClassMate/docker-hub-pull-counter
+3. 选择 XuXuClassMate/open-stats-gateway
 4. Railway 会自动检测 Node.js 并部署
 5. 获取生成的域名（类似 https://xxx-production.up.railway.app）
 
@@ -82,7 +82,7 @@ wrangler login
 3. 创建 wrangler.toml:
 
 ```toml
-name = "docker-hub-pull-counter"
+name = "open-stats-gateway"
 main = "server.js"
 compatibility_date = "2024-01-01"
 ```
@@ -98,8 +98,8 @@ wrangler deploy
 运行
 
 ```bash
-docker build -t docker-hub-pull-counter .
-docker run -p 3000:3000 docker-hub-pull-counter
+docker build -t open-stats-gateway .
+docker run -p 3000:3000 open-stats-gateway
 ```
 
 ## 📊 API 使用示例

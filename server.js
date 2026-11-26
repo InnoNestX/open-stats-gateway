@@ -171,6 +171,25 @@ function parseDays(value, fallback = 30) {
 
 app.use('/api/*', cors());
 
+// Docker-Hub data is served by the authenticated Vercel backend; proxy those
+// endpoints so Cloudflare egress IPs don't hit Docker Hub's anonymous rate limit.
+const DOCKER_BACKEND = 'https://docker-hub-pull-counter.vercel.app';
+const NATIVE_PATHS = new Set(['/api/portfolio', '/api/health', '/api/openapi.json']);
+app.use('/api/*', async (c, next) => {
+  const path = c.req.path;
+  if (NATIVE_PATHS.has(path) || path.startsWith('/api/internal')) return next();
+  try {
+    const u = new URL(c.req.url);
+    const r = await fetch(`${DOCKER_BACKEND}${u.pathname}${u.search}`, { headers: { 'User-Agent': 'open-stats-gateway' } });
+    const buf = await r.arrayBuffer();
+    const h = new Headers(r.headers);
+    h.set('Access-Control-Allow-Origin', '*');
+    return new Response(buf, { status: r.status, headers: h });
+  } catch {
+    return next();
+  }
+});
+
 app.use('/api/*', async (c, next) => {
   const pathName = new URL(c.req.url).pathname;
   // Keep health and public badge total-calls lightly gated but still counted in limiter
@@ -836,11 +855,14 @@ app.get('/api/portfolio', async (c) => {
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null);
 
-  const [skRes, pkRes, ghIssues, ghPRs] = await Promise.all([
+  const [skRes, pkRes, ghIssues, ghPRs, us, gs, hist] = await Promise.all([
     Promise.all(SKILLS.map((s) => jget(`https://clawhub.ai/api/v1/skills/${s}?owner=${USER}`))),
     Promise.all(PLUGINS.map((n) => jget(`https://clawhub.ai/api/v1/packages/${n}`))),
     jget(`https://api.github.com/search/issues?q=${encodeURIComponent(`author:${USER} type:issue`)}&per_page=1`),
-    jget(`https://api.github.com/search/issues?q=${encodeURIComponent(`author:${USER} type:pr`)}&per_page=1`)
+    jget(`https://api.github.com/search/issues?q=${encodeURIComponent(`author:${USER} type:pr`)}&per_page=1`),
+    jget(`${DOCKER_BACKEND}/api/user/stats?username=${USER}`),
+    jget(`${DOCKER_BACKEND}/api/stats`),
+    jget(`${DOCKER_BACKEND}/api/user/history?username=${USER}`)
   ]);
 
   let clawDownloads = 0;
@@ -859,7 +881,13 @@ app.get('/api/portfolio', async (c) => {
     }
   }
 
+  const pts = (hist && Array.isArray(hist.points)) ? hist.points.map((p) => Number(p.totalPulls)).filter(Number.isFinite) : [];
   const data = {
+    pulls: Number(us && us.totalPulls) || 0,
+    images: Number(us && us.repositoryCount) || 0,
+    apiCalls: Number(gs && gs.totalCalls) || 0,
+    monthDelta: pts.length > 1 ? pts[pts.length - 1] - pts[0] : 0,
+    history: pts,
     clawDownloads,
     clawSkills,
     clawPlugins,
@@ -869,7 +897,7 @@ app.get('/api/portfolio', async (c) => {
   };
 
   // Only cache a healthy result, so a transient upstream failure self-heals.
-  if (clawSkills > 0 || clawPlugins > 0) {
+  if (clawSkills > 0 || clawPlugins > 0 || data.pulls > 0) {
     cache.set(CACHE_KEY, data, 30 * 60 * 1000);
   }
 
@@ -1024,53 +1052,5 @@ app.get('/api/health', async (c) => {
   );
 });
 
-app.get('/', (c) => {
-  const indexPath = path.join(__dirname, 'public', 'index.html');
-  const indexHtml = fs.readFileSync(indexPath, 'utf-8');
-  return c.html(indexHtml);
-});
-
-app.get('/favicon.ico', (c) => {
-  try {
-    const faviconPath = path.join(__dirname, 'public', 'favicon.ico');
-    const favicon = fs.readFileSync(faviconPath);
-    return c.body(favicon, 200, {
-      'Content-Type': 'image/x-icon'
-    });
-  } catch {
-    return c.notFound();
-  }
-});
-
-app.get('/*', (c) => {
-  const reqPath = c.req.path;
-  const filePath = path.join(__dirname, 'public', reqPath);
-
-  try {
-    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-      return c.notFound();
-    }
-
-    const ext = path.extname(filePath).toLowerCase();
-    const mimeTypes = {
-      '.html': 'text/html',
-      '.js': 'application/javascript',
-      '.css': 'text/css',
-      '.json': 'application/json',
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.gif': 'image/gif',
-      '.svg': 'image/svg+xml',
-      '.ico': 'image/x-icon'
-    };
-
-    return c.body(fs.readFileSync(filePath), 200, {
-      'Content-Type': mimeTypes[ext] || 'application/octet-stream'
-    });
-  } catch (error) {
-    console.error('Static file error:', error.message);
-    return c.notFound();
-  }
-});
 
 module.exports = app;

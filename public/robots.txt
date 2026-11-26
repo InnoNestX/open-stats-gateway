@@ -6,4 +6,4 @@ Allow: /api/docker-stats
 Allow: /api/badge/
 Disallow: /api/internal/
 
-Sitemap: https://docker-hub-pull-counter.vercel.app/sitemap.xml
+Sitemap: https://open.xuxuclassmate.com/sitemap.xml
