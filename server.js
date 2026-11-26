@@ -1044,13 +1044,14 @@ app.get('/api/internal/snapshot-history', async (c) => {
 // Each view increments all three, so monthly retains the sum after daily expires,
 // and the total retains everything after monthly expires. No cron needed.
 const PV_BASELINE = 573771; // set to the real historical total; applied once if below it
+const SCANS_SEED = 400960;        // all-domains last-30d malicious scans (from Cloudflare)
 const PV_DAY_TTL = '2678400';    // 31 days
 const PV_MONTH_TTL = '34560000'; // 400 days (keeps a full year)
 app.get('/api/views', async (c) => {
   const noStore = { 'Cache-Control': 'no-store' };
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  const empty = { total: 0, today: 0, month: 0 };
+  const empty = { total: 0, today: 0, month: 0, scans30d: 0 };
   if (!url || !token) return c.json(empty, 200, rateHeaders(c, noStore));
   const cmd = (args) =>
     fetch(url, {
@@ -1071,7 +1072,10 @@ app.get('/api/views', async (c) => {
     await cmd(['EXPIRE', `pv:day:${day}`, PV_DAY_TTL]);
     const monthCount = Number((await cmd(['INCR', `pv:month:${month}`]))?.result) || 0;
     await cmd(['EXPIRE', `pv:month:${month}`, PV_MONTH_TTL]);
-    return c.json({ total, today, month: monthCount }, 200, rateHeaders(c, noStore));
+    // malicious scans across all zones (last 30d), kept in Redis; cron refreshes it from Cloudflare
+    let scans30d = Number((await cmd(['GET', 'sec:scans30d']))?.result) || 0;
+    if (!scans30d) { await cmd(['SET', 'sec:scans30d', String(SCANS_SEED)]); scans30d = SCANS_SEED; }
+    return c.json({ total, today, month: monthCount, scans30d }, 200, rateHeaders(c, noStore));
   } catch {
     return c.json(empty, 200, rateHeaders(c, noStore));
   }
