@@ -24,5 +24,8 @@ export default {
     ctx.waitUntil(
       app.fetch(new Request("https://open.xuxuclassmate.com/api/internal/snapshot-history"), env, ctx),
     );
+    ctx.waitUntil(
+      app.fetch(new Request("https://open.xuxuclassmate.com/api/internal/refresh-cf"), env, ctx),
+    );
   },
 };

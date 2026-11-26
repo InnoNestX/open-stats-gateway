@@ -1106,7 +1106,8 @@ const K = {
   aTheme: 'stats:analytics:theme',
   aHours: 'stats:analytics:hours',
   aDwell: 'stats:analytics:dwell',
-  aDwellPage: 'stats:analytics:dwellByPage'
+  aDwellPage: 'stats:analytics:dwellByPage',
+  cfHosts: 'stats:analytics:cfHosts'        // HASH hostname -> last-30d requests (from Cloudflare)
 };
 const SCHEMA_VERSION = '5';
 const PV_BASELINE = 573771;    // real historical page-view total; applied once if below it
@@ -1185,14 +1186,22 @@ app.get('/api/views', async (c) => {
   try {
     await migrateStats(cmd);
     const { y, dd, mm } = parts();
-    const total = Number((await cmd(['GET', K.pvTotal]))?.result) || 0;
+    const base = Number((await cmd(['GET', K.pvTotal]))?.result) || 0;
+    // add subdomains that can't be beaconed (ssh/nas/mail/watch...), measured by Cloudflare
+    const cfHosts = await hgetallObj(cmd, K.cfHosts);
+    let subSum = 0;
+    for (const [host, v] of Object.entries(cfHosts)) {
+      const sub = String(host).split('.')[0];
+      if (sub !== 'www' && sub !== 'open') subSum += Number(v) || 0;
+    }
+    const total = (base || PV_BASELINE) + subSum;
     const wwwMonth = await hgetallObj(cmd, K.pvSiteMonth('www', y, mm));
     const today = Number(wwwMonth[dd]) || 0;
     let month = 0;
     for (const v of Object.values(wwwMonth)) month += Number(v) || 0;
     let scans30d = Number((await cmd(['GET', K.scans]))?.result) || 0;
     if (!scans30d) { await cmd(['SET', K.scans, String(SCANS_SEED)]); scans30d = SCANS_SEED; }
-    return c.json({ total: total || PV_BASELINE, today, month, scans30d }, 200, rateHeaders(c, noStore));
+    return c.json({ total, today, month, scans30d }, 200, rateHeaders(c, noStore));
   } catch {
     return c.json(empty, 200, rateHeaders(c, noStore));
   }
@@ -1274,6 +1283,56 @@ app.get('/api/internal/stats-dump', async (c) => {
     }
   }
   return c.json({ keys, dump }, 200, { 'Cache-Control': 'no-store' });
+});
+
+// Pull per-subdomain request counts + firewall (malicious scan) events from
+// Cloudflare analytics into Redis. No-op unless CF_ANALYTICS_TOKEN is set.
+// Needs a token with Account Analytics:Read + Zone Analytics:Read + Zone:Read.
+async function refreshFromCloudflare(cmd) {
+  const token = process.env.CF_ANALYTICS_TOKEN;
+  if (!token) return { ok: false, reason: 'no-token' };
+  const bearer = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const zr = await fetch('https://api.cloudflare.com/client/v4/zones?per_page=50&status=active', { headers: bearer })
+    .then((r) => r.json()).catch((e) => ({ errors: [String(e)] }));
+  const zones = (zr && zr.result) || [];
+  const report = { ok: true, zones: zones.map((z) => z.name), hostCounts: {}, scans: 0, errors: [] };
+  if (!zones.length) { report.ok = false; report.errors.push({ zones: (zr && zr.errors) || 'none' }); return report; }
+  const since = new Date(Date.now() - 30 * 864e5).toISOString();
+  for (const z of zones) {
+    const query = 'query($zone:String!,$since:Time!){viewer{zones(filter:{zoneTag:$zone}){'
+      + 'hosts:httpRequestsAdaptiveGroups(limit:100,filter:{datetime_geq:$since},orderBy:[count_DESC]){count dimensions{clientRequestHTTPHost}}'
+      + ' fw:firewallEventsAdaptiveGroups(limit:1,filter:{datetime_geq:$since}){count}'
+      + '}}}';
+    const r = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+      method: 'POST', headers: bearer, body: JSON.stringify({ query, variables: { zone: z.id, since } })
+    }).then((x) => x.json()).catch((e) => ({ errors: [String(e)] }));
+    if (r && r.errors && r.errors.length) { report.errors.push({ zone: z.name, errors: r.errors }); continue; }
+    const zd = r && r.data && r.data.viewer && r.data.viewer.zones && r.data.viewer.zones[0];
+    if (!zd) continue;
+    for (const h of (zd.hosts || [])) {
+      const host = h.dimensions && h.dimensions.clientRequestHTTPHost;
+      if (host) report.hostCounts[host] = (report.hostCounts[host] || 0) + (Number(h.count) || 0);
+    }
+    for (const f of (zd.fw || [])) report.scans += Number(f.count) || 0;
+  }
+  const hosts = Object.entries(report.hostCounts);
+  if (hosts.length) {
+    await cmd(['DEL', K.cfHosts]);
+    const args = ['HSET', K.cfHosts];
+    for (const [h, n] of hosts) args.push(h.slice(0, 80), String(n));
+    await cmd(args);
+  }
+  if (report.scans > 0) await cmd(['SET', K.scans, String(report.scans)]);
+  await cmd(['SET', K.updated, new Date().toISOString()]);
+  return report;
+}
+
+// Trigger the Cloudflare refresh (also run daily by the cron). Returns a report.
+app.get('/api/internal/refresh-cf', async (c) => {
+  const cmd = redisClient();
+  if (!cmd) return c.json({ ok: false, error: 'redis-not-configured' }, 200, { 'Cache-Control': 'no-store' });
+  const report = await refreshFromCloudflare(cmd);
+  return c.json(report, 200, { 'Cache-Control': 'no-store' });
 });
 
 app.get('/api/health', async (c) => {
