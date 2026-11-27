@@ -1297,23 +1297,31 @@ async function refreshFromCloudflare(cmd) {
   const zones = (zr && zr.result) || [];
   const report = { ok: true, zones: zones.map((z) => z.name), hostCounts: {}, scans: 0, errors: [] };
   if (!zones.length) { report.ok = false; report.errors.push({ zones: (zr && zr.errors) || 'none' }); return report; }
-  const since = new Date(Date.now() - 30 * 864e5).toISOString();
+  const since = new Date(Date.now() - 29 * 864e5).toISOString(); // 29d: CF adaptive rounds datetime_geq down to a day boundary, and caps the span at 4w2d (30d)
   for (const z of zones) {
-    const query = 'query($zone:String!,$since:Time!){viewer{zones(filter:{zoneTag:$zone}){'
-      + 'hosts:httpRequestsAdaptiveGroups(limit:100,filter:{datetime_geq:$since},orderBy:[count_DESC]){count dimensions{clientRequestHTTPHost}}'
-      + ' fw:firewallEventsAdaptiveGroups(limit:1,filter:{datetime_geq:$since}){count}'
-      + '}}}';
-    const r = await fetch('https://api.cloudflare.com/client/v4/graphql', {
-      method: 'POST', headers: bearer, body: JSON.stringify({ query, variables: { zone: z.id, since } })
+    // Two SEPARATE GraphQL requests: Cloudflare nulls the whole `data` when any
+    // field hits an authz error, so firewall (which the token may lack) must not
+    // share a request with hosts (which it has).
+    const gql = (q) => fetch('https://api.cloudflare.com/client/v4/graphql', {
+      method: 'POST', headers: bearer, body: JSON.stringify({ query: q, variables: { zone: z.id, since } })
     }).then((x) => x.json()).catch((e) => ({ errors: [String(e)] }));
-    if (r && r.errors && r.errors.length) { report.errors.push({ zone: z.name, errors: r.errors }); continue; }
-    const zd = r && r.data && r.data.viewer && r.data.viewer.zones && r.data.viewer.zones[0];
-    if (!zd) continue;
-    for (const h of (zd.hosts || [])) {
-      const host = h.dimensions && h.dimensions.clientRequestHTTPHost;
-      if (host) report.hostCounts[host] = (report.hostCounts[host] || 0) + (Number(h.count) || 0);
+    // (a) per-subdomain request counts
+    const hq = 'query($zone:String!,$since:Time!){viewer{zones(filter:{zoneTag:$zone}){'
+      + 'hosts:httpRequestsAdaptiveGroups(limit:100,filter:{datetime_geq:$since},orderBy:[count_DESC]){count dimensions{clientRequestHTTPHost}}'
+      + '}}}';
+    const hr = await gql(hq);
+    if (hr && hr.errors && hr.errors.length) report.errors.push({ zone: z.name, part: 'hosts', errors: hr.errors });
+    const hzd = hr && hr.data && hr.data.viewer && hr.data.viewer.zones && hr.data.viewer.zones[0];
+    for (const h of ((hzd && hzd.hosts) || [])) {
+      let host = h.dimensions && h.dimensions.clientRequestHTTPHost;
+      if (!host) continue;
+      host = String(host).toLowerCase().split(':')[0]; // drop :port (cPanel/webmail ports etc.)
+      // keep only our own zone; drop upstash/vercel/github/other external hosts
+      if (host !== 'xuxuclassmate.com' && !host.endsWith('.xuxuclassmate.com')) continue;
+      report.hostCounts[host] = (report.hostCounts[host] || 0) + (Number(h.count) || 0);
     }
-    for (const f of (zd.fw || [])) report.scans += Number(f.count) || 0;
+    // Malicious-scan count (scans30d) is owned by the watch service, which
+    // writes it to Redis on a schedule; this worker only reads it. No fw query here.
   }
   const hosts = Object.entries(report.hostCounts);
   if (hosts.length) {
